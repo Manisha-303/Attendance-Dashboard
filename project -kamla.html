@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Attendance Management Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 80px;
+      background: lavender;
+      font-family: 'Segoe UI', sans-serif;
+      backdrop-filter: blur(10px);
+    }
+    .glass {
+      background: rgba(255, 255, 255, 0.25);
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 30px;
+      margin-bottom: 40px;
+    }
+    .chart {
+      margin: 20px 0;
+    }
+    table, th, td {
+      border: 1px solid #999;
+      border-collapse: collapse;
+      padding: 6px 10px;
+    }
+    th {
+      background-color: #e6e6fa;
+    }
+    #downloadBtn {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none;
+      background-color: #6a5acd;
+      color: white;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="glass">
+    <h2>Upload Excel Attendance File</h2>
+    <input type="file" id="fileUpload" accept=".xlsx, .xls" />
+  </div>
+
+  <div class="glass" id="dataDisplay">
+    <h3>Attendance Records</h3>
+    <div id="tableContainer"></div>
+  </div>
+
+  <div class="glass">
+    <h3>Total Present/Absent per Student</h3>
+    <div id="summaryTable"></div>
+  </div>
+
+  <div class="glass">
+    <h3>Attendance Percentage by Student</h3>
+    <div id="percentageTable"></div>
+  </div>
+
+  <div class="glass">
+    <h3>Daily Attendance Trends</h3>
+    <div id="dailyTrend" class="chart"></div>
+  </div>
+
+  <div class="glass">
+    <h3>Class-wise Attendance Summary</h3>
+    <div id="classSummary" class="chart"></div>
+  </div>
+
+  <div class="glass">
+    <h3>Top Regular Students (>= 75%)</h3>
+    <div id="topRegular" class="chart"></div>
+  </div>
+
+  <div class="glass">
+    <h3>Top Irregular Students (< 75%)</h3>
+    <div id="topIrregular" class="chart"></div>
+  </div>
+
+  <button id="downloadBtn">Download Summary Report</button>
+
+  <script>
+    document.getElementById('fileUpload').addEventListener('change', handleFile, false);
+
+    let attendanceData = [];
+
+    function handleFile(e) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+
+      reader.onload = function (e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        attendanceData = XLSX.utils.sheet_to_json(sheet);
+        generateDashboard();
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    function generateDashboard() {
+      if (!attendanceData.length) return;
+
+      const tableContainer = document.getElementById('tableContainer');
+      const summaryTable = document.getElementById('summaryTable');
+      const percentageTable = document.getElementById('percentageTable');
+
+      let studentSummary = {};
+      let classSummary = {};
+      let dailyTrend = {};
+
+      // Render records
+      let tableHTML = `<table><tr>${Object.keys(attendanceData[0]).map(h => `<th>${h}</th>`).join('')}</tr>`;
+      attendanceData.forEach(row => {
+        tableHTML += `<tr>${Object.values(row).map(v => `<td>${v}</td>`).join('')}</tr>`;
+
+        const student = row.Student;
+        const status = row.Status;
+        const date = row.Date;
+        const className = row.Class;
+
+        if (!studentSummary[student]) studentSummary[student] = { present: 0, absent: 0 };
+        if (!classSummary[className]) classSummary[className] = { present: 0, total: 0 };
+        if (!dailyTrend[date]) dailyTrend[date] = 0;
+
+        if (status.toLowerCase() === 'present') {
+          studentSummary[student].present++;
+          classSummary[className].present++;
+          dailyTrend[date]++;
+        } else {
+          studentSummary[student].absent++;
+        }
+        classSummary[className].total++;
+      });
+      tableHTML += '</table>';
+      tableContainer.innerHTML = tableHTML;
+
+      // Summary Table
+      let summaryHTML = `<table><tr><th>Student</th><th>Present</th><th>Absent</th></tr>`;
+      Object.entries(studentSummary).forEach(([student, summary]) => {
+        summaryHTML += `<tr><td>${student}</td><td>${summary.present}</td><td>${summary.absent}</td></tr>`;
+      });
+      summaryHTML += '</table>';
+      summaryTable.innerHTML = summaryHTML;
+
+      // Attendance Percentage
+      let percentHTML = `<table><tr><th>Student</th><th>Attendance %</th><th>Status</th></tr>`;
+      const regular = [], irregular = [];
+      Object.entries(studentSummary).forEach(([student, summary]) => {
+        const total = summary.present + summary.absent;
+        const percent = ((summary.present / total) * 100).toFixed(2);
+        const status = percent >= 75 ? '✔️ Regular' : '❌ Irregular';
+        percentHTML += `<tr><td>${student}</td><td>${percent}%</td><td>${status}</td></tr>`;
+
+        (percent >= 75 ? regular : irregular).push({ student, percent });
+      });
+      percentHTML += '</table>';
+      percentageTable.innerHTML = percentHTML;
+
+      // Daily Trend
+      Plotly.newPlot('dailyTrend', [{
+        x: Object.keys(dailyTrend),
+        y: Object.values(dailyTrend),
+        type: 'scatter',
+        mode: 'lines+markers',
+        marker: { color: 'green' }
+      }], { title: 'Daily Attendance Trends' });
+
+      // Class-wise Summary
+      Plotly.newPlot('classSummary', [{
+        x: Object.keys(classSummary),
+        y: Object.values(classSummary).map(x => ((x.present / x.total) * 100).toFixed(2)),
+        type: 'bar',
+        marker: { color: 'purple' }
+      }], { title: 'Class-wise Attendance Percentage', yaxis: { title: '%' } });
+
+      // Top Regular Students
+      Plotly.newPlot('topRegular', [{
+        x: regular.map(s => s.student),
+        y: regular.map(s => s.percent),
+        type: 'bar',
+        marker: { color: 'blue' }
+      }], { title: 'Top Regular Students (>= 75%)', yaxis: { title: '%' } });
+
+      // Top Irregular Students
+      Plotly.newPlot('topIrregular', [{
+        x: irregular.map(s => s.student),
+        y: irregular.map(s => s.percent),
+        type: 'bar',
+        marker: { color: 'red' }
+      }], { title: 'Top Irregular Students (< 75%)', yaxis: { title: '%' } });
+
+      // Download Report
+      document.getElementById('downloadBtn').onclick = () => {
+        const summary = Object.entries(studentSummary).map(([student, data]) => {
+          const total = data.present + data.absent;
+          const percent = ((data.present / total) * 100).toFixed(2);
+          return { Student: student, Present: data.present, Absent: data.absent, Percentage: percent };
+        });
+        const worksheet = XLSX.utils.json_to_sheet(summary);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Summary Report");
+        XLSX.writeFile(workbook, "Attendance_Summary.xlsx");
+      }
+    }
+  </script>
+</body>
+</html>
